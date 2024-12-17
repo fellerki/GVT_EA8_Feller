@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+  <title>GVT - EA8 - Kim Feller</title>
+</head>
+<body>
+<h1>EA8 - Lichter auf einer Kreisbahn mit Toon Shading</h1>
+<h2>Graphical Visualisation Technologies</h2>
+<p>Kim Lara Feller, Technische Hochschule Lübeck, Matrikelnummer 331177</p>
+<p><b>Hinweise und Referenzen</b></p>
+<p>Durch Drücken der Taste <b>L</b> bzw. <b>l</b> können die beiden Lichtquellen animiert werden.
+  Solange die Taste betätigt wird (key-down), kreisen die Lichtquellen um die Würfeln.</p>
+
+<canvas id="webglCanvas" width="800" height="600"></canvas>
+<script type="module">
+  const canvas = document.getElementById('webglCanvas');
+  const gl = canvas.getContext('webgl');
+
+  if (!gl) {
+    console.error("WebGL wird nicht unterstützt.");
+  }
+
+  const vertexShaderSource = `
+        attribute vec3 aPosition;
+        attribute vec3 aNormal;
+
+        uniform mat4 uModelMatrix;
+        uniform mat4 uViewMatrix;
+        uniform mat4 uProjectionMatrix;
+        uniform mat3 uNormalMatrix;
+
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+
+        void main() {
+            vec4 worldPosition = uModelMatrix * vec4(aPosition, 1.0);
+            vPosition = worldPosition.xyz;
+            vNormal = normalize(uNormalMatrix * aNormal);
+            gl_Position = uProjectionMatrix * uViewMatrix * worldPosition;
+        }
+        `;
+
+  // Implementierung des Toon-Shadings im Fragment Shader
+  const fragmentShaderSource = `
+        precision mediump float;
+
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+
+        uniform vec3 uLightPosition1;
+        uniform vec3 uLightPosition2;
+        uniform vec3 uLightColor1;
+        uniform vec3 uLightColor2;
+        uniform vec3 uObjectColor;
+
+        void main() {
+            vec3 normal = normalize(vNormal);
+            vec3 lightDir1 = normalize(uLightPosition1 - vPosition);
+            vec3 lightDir2 = normalize(uLightPosition2 - vPosition);
+
+            // Multiplikation für stärkere Lichtintensität
+            float diff1 = max(dot(normal, lightDir1), 0.0) * 2.0;
+            float diff2 = max(dot(normal, lightDir2), 0.0) * 2.0;
+
+            float combinedDiff = (diff1 + diff2) / 2.0;
+
+            // Float level zum Anpassen des Toon-Effektes
+            float levels = 8.0;
+            float toon = floor(combinedDiff * levels) / levels;
+
+            vec3 color = uObjectColor * (uLightColor1 * diff1 + uLightColor2 * diff2) * toon;
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+        `;
+
+  function compileShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  }
+
+  function createProgram(gl, vertexSource, fragmentSource) {
+    const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
+    const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error(gl.getProgramInfoLog(program));
+      return null;
+    }
+    return program;
+  }
+
+  const program = createProgram(gl, vertexShaderSource, fragmentShaderSource);
+
+  // Würfel
+  const cubeVertices = new Float32Array([
+    -0.5, -0.5,  0.5,  0,  0,  1,
+    0.5, -0.5,  0.5,  0,  0,  1,
+    0.5,  0.5,  0.5,  0,  0,  1,
+    -0.5,  0.5,  0.5,  0,  0,  1,
+    -0.5, -0.5, -0.5,  0,  0, -1,
+    0.5, -0.5, -0.5,  0,  0, -1,
+    0.5,  0.5, -0.5,  0,  0, -1,
+    -0.5,  0.5, -0.5,  0,  0, -1,
+  ]);
+
+  const cubeIndices = new Uint16Array([
+    0, 1, 2,  0, 2, 3,
+    4, 5, 6,  4, 6, 7,
+    3, 2, 6,  3, 6, 7,
+    0, 1, 5,  0, 5, 4,
+    0, 3, 7,  0, 7, 4,
+    1, 2, 6,  1, 6, 5
+  ]);
+
+  const vertexBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, cubeVertices, gl.STATIC_DRAW);
+
+  const indexBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cubeIndices, gl.STATIC_DRAW);
+
+  const aPosition = gl.getAttribLocation(program, 'aPosition');
+  const aNormal = gl.getAttribLocation(program, 'aNormal');
+
+  gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 24, 0);
+  gl.enableVertexAttribArray(aPosition);
+
+  gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 24, 12);
+  gl.enableVertexAttribArray(aNormal);
+
+  const uModelMatrix = gl.getUniformLocation(program, 'uModelMatrix');
+  const uViewMatrix = gl.getUniformLocation(program, 'uViewMatrix');
+  const uProjectionMatrix = gl.getUniformLocation(program, 'uProjectionMatrix');
+  const uNormalMatrix = gl.getUniformLocation(program, 'uNormalMatrix');
+  const uLightPosition1 = gl.getUniformLocation(program, 'uLightPosition1');
+  const uLightPosition2 = gl.getUniformLocation(program, 'uLightPosition2');
+  const uLightColor1 = gl.getUniformLocation(program, 'uLightColor1');
+  const uLightColor2 = gl.getUniformLocation(program, 'uLightColor2');
+  const uObjectColor = gl.getUniformLocation(program, 'uObjectColor');
+
+  // Würfel Grid mit 5x5
+  const gridSize = 5;
+  const spacing = 1.5;
+  const modelMatrices = [];
+
+  for (let row = 0; row < gridSize; row++) {
+    for (let col = 0; col < gridSize; col++) {
+      const modelMatrix = mat4.create();
+      mat4.translate(modelMatrix, modelMatrix, [col * spacing, row * spacing, 0]);
+      modelMatrices.push(modelMatrix);
+    }
+  }
+
+  const viewMatrix = mat4.create();
+  const projectionMatrix = mat4.create();
+  const normalMatrix = mat3.create();
+
+  mat4.lookAt(viewMatrix, [2, 6, 10], [gridSize / 2, gridSize / 2, 0], [0, 1, 0]);
+  mat4.perspective(projectionMatrix, Math.PI / 4, canvas.width / canvas.height, 0.1, 100);
+
+  let angle = 0;
+  const lightRadius = 6.0;
+  let animateLights = false;
+
+  // Position der Lichtquellen
+  function render() {
+    if (animateLights) {
+      angle += 0.02;
+    }
+
+    const light1Pos = [lightRadius * Math.cos(angle), 4.0, lightRadius * Math.sin(angle)];
+    const light2Pos = [lightRadius * Math.cos(angle + Math.PI), 4.0, lightRadius * Math.sin(angle + Math.PI)];
+
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.useProgram(program);
+
+    gl.uniformMatrix4fv(uViewMatrix, false, viewMatrix);
+    gl.uniformMatrix4fv(uProjectionMatrix, false, projectionMatrix);
+    gl.uniform3fv(uLightPosition1, light1Pos);
+    gl.uniform3fv(uLightPosition2, light2Pos);
+    gl.uniform3fv(uLightColor1, [0.0, 1.0, 0.4]); //Grün
+    gl.uniform3fv(uLightColor2, [1.0, 0.08, 0.58]); //Pink
+
+    for (let i = 0; i < modelMatrices.length; i++) {
+      gl.uniformMatrix4fv(uModelMatrix, false, modelMatrices[i]);
+      mat3.normalFromMat4(normalMatrix, modelMatrices[i]);
+      gl.uniformMatrix3fv(uNormalMatrix, false, normalMatrix);
+      gl.uniform3fv(uObjectColor, [0.5 + 0.1 * (i % gridSize), 0.3, 0.8 - 0.1 * Math.floor(i / gridSize)]);
+      gl.drawElements(gl.TRIANGLES, cubeIndices.length, gl.UNSIGNED_SHORT, 0);
+    }
+
+    requestAnimationFrame(render);
+  }
+
+  // Licht-Animation starten
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'l' || event.key === 'L') {
+      animateLights = true;
+    }
+  });
+
+  // Licht-Animation stoppen
+  window.addEventListener('keyup', (event) => {
+    if (event.key === 'l' || event.key === 'L') {
+      animateLights = false;
+    }
+  });
+
+  gl.enable(gl.DEPTH_TEST);
+  gl.clearColor(0.1, 0.1, 0.1, 1.0);
+
+  render();
+</script>
+</body>
+</html>
